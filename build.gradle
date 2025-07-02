@@ -1,0 +1,161 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+// Чтение текущей версии из файла
+def versionFile = file('version.txt')
+def currentVersion = versionFile.exists() ? versionFile.text.trim() : "1.0.0"
+
+// Устанавливаем версию проекта из файла version.txt
+version = currentVersion
+group = mod_group_id
+
+// Обновляем версии во всех файлах перед началом сборки
+updateVersionInFiles(currentVersion)
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        client {
+            property 'forge.enabledGameTestNamespaces', mod_id
+        }
+
+        server {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            args '--nogui'
+        }
+    }
+}
+
+repositories {
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+}
+
+// Функция для обновления версии во всех файлах
+def updateVersionInFiles(String version) {
+    // Обновляем версию в gradle.properties
+    def gradlePropertiesFile = file('gradle.properties')
+    if (gradlePropertiesFile.exists()) {
+        def content = gradlePropertiesFile.text
+        def updated = content.replaceAll(/mod_version=.*/, "mod_version=$version")
+        if (content != updated) {
+            gradlePropertiesFile.text = updated
+            println "Обновлена версия в gradle.properties: $version"
+        }
+    }
+    
+    // Обновляем версию в Main.java
+    def mainJavaFile = file('src/main/java/com/spinty/spintymod/Main.java')
+    if (mainJavaFile.exists()) {
+        def content = mainJavaFile.text
+        if (content.contains("MOD_VERSION")) {
+            def updated = content.replaceAll(/(public static final String MOD_VERSION\s*=\s*")[^"]*(")/,
+                                           "\$1${version}\$2")
+            if (content != updated) {
+                mainJavaFile.text = updated
+                println "Обновлена версия в Main.java: $version"
+            }
+        }
+    }
+    
+    // Обновляем версию в mods.toml напрямую
+    def modsTomlFile = file('src/main/resources/META-INF/mods.toml')
+    if (modsTomlFile.exists()) {
+        def content = modsTomlFile.text
+        def updated = content.replaceAll(/version="[^"]*"/, "version=\"$version\"")
+        if (content != updated) {
+            modsTomlFile.text = updated
+            println "Обновлена версия в mods.toml: $version"
+        }
+    }
+}
+
+// Очищаем кэш ресурсов перед каждой сборкой
+tasks.named('processResources').configure {
+    // Удаляем выходной каталог перед обработкой ресурсов
+    outputs.upToDateWhen { false }
+    
+    var replaceProperties = [
+            minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
+            forge_version: forge_version, forge_version_range: forge_version_range,
+            loader_version_range: loader_version_range,
+            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: version,
+            mod_authors: mod_authors, mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+// Принудительно очищаем кэш перед сборкой
+tasks.named('clean').configure {
+    doLast {
+        // Удаляем директорию build
+        delete "${buildDir}"
+        println "Директория build очищена"
+        
+        // Удаляем директорию run
+        delete "${projectDir}/run"
+        println "Директория run очищена"
+    }
+}
+
+// Создаем отдельную задачу для обновления версии
+task updateVersion {
+    doLast {
+        println "Версия мода установлена: $currentVersion"
+    }
+}
+
+// Выполняем очистку перед сборкой
+tasks.named('build').configure {
+    dependsOn(clean)
+}
+
+tasks.named('jar', Jar).configure {
+    // Принудительно пересобираем JAR каждый раз
+    outputs.upToDateWhen { false }
+    
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : version,
+                'Implementation-Title'    : project.name,
+                'Implementation-Version'  : version,
+                'Implementation-Vendor'   : mod_authors,
+                'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+
+    finalizedBy 'reobfJar'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
